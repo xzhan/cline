@@ -346,6 +346,152 @@ flowchart LR
 | EDA tools to artifacts | Filesystem, reports, waveforms, databases | RTL, testbench, logs, coverage, SDF/SPEF/SDC, timing reports | The filesystem is the durable data plane across steps. |
 | Remote EDA service | HTTP/gRPC/job queue plus artifact storage | Submit jobs, poll status, stream logs, download reports | This is project-specific. Cline should call it through MCP or scripts rather than hardcoding EDA semantics in the agent loop. |
 
+### Runtime Streaming Path
+
+Streaming output is event-forwarded through Cline rather than sent directly from
+the model provider to the browser. Model providers usually stream over HTTPS
+provider APIs behind `@cline/llms`; Cline normalizes those chunks into runtime
+events, and product surfaces decide how to render them.
+
+For the Hub browser dashboard, the concrete path is:
+
+```mermaid
+sequenceDiagram
+  participant Browser as Hub browser UI
+  participant HubApp as apps/cline-hub server
+  participant Core as @cline/core
+  participant Agent as @cline/agents
+  participant LLMs as @cline/llms
+  participant Provider as Model provider
+
+  Browser->>HubApp: WebSocket /browser frame: send prompt
+  HubApp->>Core: ctx.cline.start or ctx.cline.send
+  Core->>Agent: run session turn
+  Agent->>LLMs: model.stream(request)
+  LLMs->>Provider: HTTPS streaming request
+  Provider-->>LLMs: text/tool/reasoning deltas
+  LLMs-->>Agent: AgentModelEvent text-delta
+  Agent-->>Core: assistant-text-delta / runtime event
+  Core-->>HubApp: CoreSessionEvent chunk or agent_event
+  HubApp-->>Browser: WebSocket /browser assistant_delta
+  Browser->>Browser: appendAssistantDelta()
+```
+
+Important implementation points:
+
+- `apps/cline-hub/src/webview/src/vscode.ts` opens the dashboard browser
+  socket at `/browser` and dispatches received JSON as webview messages.
+- `apps/cline-hub/src/server.ts` handles `/browser` WebSocket frames. A
+  browser `send` frame calls `sendMessage(...)`, which creates or continues a
+  selected Cline session through `ctx.cline`.
+- `sdk/packages/llms/src/providers/ai-sdk.ts` calls `streamText(...)` and
+  converts AI SDK stream parts into normalized events such as `text-delta`,
+  `reasoning-delta`, `tool-call-delta`, `usage`, and `finish`.
+- `sdk/packages/agents/src/agent-runtime.ts` consumes the model stream with
+  `for await (...)`. Each `text-delta` becomes an `assistant-text-delta`
+  runtime event immediately, before the full assistant message is complete.
+- `apps/cline-hub/src/server/agent-events.ts` receives `CoreSessionEvent`
+  updates, extracts the chunk text, and sends browser payloads like:
+
+  ```json
+  { "type": "assistant_delta", "text": "partial model text" }
+  ```
+
+- `apps/cline-hub/src/server/state.ts` writes the payload to each selected
+  browser peer with `peer.socket.send(JSON.stringify(payload))`.
+- `apps/cline-hub/src/webview/src/Chat.tsx` handles `assistant_delta` by
+  calling `appendAssistantDelta(...)`, which appends the text to the active
+  assistant message.
+
+There are two WebSocket layers that are easy to confuse:
+
+| Socket | Owner | Path | Purpose |
+| --- | --- | --- | --- |
+| Dashboard browser socket | `apps/cline-hub` Bun server | `/browser` | Browser UI commands and UI-facing messages such as `assistant_delta`, `reasoning_delta`, `tool_event`, `turn_done`, and approvals. |
+| Hub daemon socket | `@cline/core/hub` | `/hub` | Shared daemon command/reply envelopes, `stream.subscribe` / `stream.unsubscribe`, event fanout, attach/resume, and approvals across clients. |
+
+The browser dashboard normally talks to `/browser`; the dashboard server talks
+to Cline through `ClineCore`, `HubUIClient`, and the hub clients. This keeps the
+browser UI small and lets the core hub enforce auth, session ownership,
+subscriptions, reconnect behavior, and durable session state.
+
+### Frontend / Backend Packaging For EDA Deployments
+
+For EDA users, Cline Hub can be deployed as separately packaged frontend and
+backend artifacts on Linux hosts such as CentOS 6, 7, or 8. The split should be
+made by runtime responsibility, not by language: both sides are TypeScript in
+source, but the built frontend is static browser assets while the backend is a
+Linux runtime service that owns sessions, credentials, tool execution, and EDA
+integration.
+
+```mermaid
+flowchart LR
+  Browser["Frontend package<br/>Hub web UI static assets"]
+  Backend["Backend package<br/>Hub server + Cline runtime"]
+  Core["@cline/core<br/>sessions, tools, hub clients"]
+  Agent["@cline/agents<br/>plan/act loop"]
+  LLM["@cline/llms<br/>provider gateway"]
+  Adapter["EDA adapter package<br/>shell/MCP/scripts/env"]
+  EDA["EDA tools<br/>VCS, lint, synthesis, STA"]
+  Files["Workspace and artifacts"]
+
+  Browser -->|HTTP assets, config| Backend
+  Browser <-->|WebSocket /browser| Backend
+  Backend --> Core
+  Core --> Agent
+  Agent --> LLM
+  Core --> Adapter
+  Adapter --> EDA
+  EDA --> Files
+  Core --> Files
+```
+
+Recommended package boundaries:
+
+| Package | Contents | OS sensitivity | Ownership |
+| --- | --- | --- | --- |
+| `cline-hub-ui` | Static files built from `apps/cline-hub/src/webview`: HTML, JS, CSS, images | Low. Browser assets should be portable across CentOS versions. | UI rendering, local browser state, user input, session selection, approvals. |
+| `cline-hub-backend-<platform>` | `apps/cline-hub` server, `@cline/core`, `@cline/agents`, `@cline/llms`, CLI/hub daemon entrypoints, runtime dependencies | High. Build and smoke-test per supported Linux target. | HTTP, `/browser` WebSocket, `/hub` client/daemon transport, sessions, credentials, LLM calls, logs, storage. |
+| `eda-tools-adapter` | Project scripts, MCP servers, environment-module wrappers, license setup, report parsers | High. Usually tied to the EDA installation and site environment. | `make lint`, `make sim`, `vcs`, `pt_shell`, report parsing, farm submission, artifact collection. |
+
+Frontend responsibilities:
+
+- Render the Hub dashboard and chat UI.
+- Open the browser WebSocket at `/browser`.
+- Send typed UI frames such as send, attach, approval, abort, reset, and
+  provider/model selection.
+- Receive UI-facing messages such as `assistant_delta`, `reasoning_delta`,
+  `tool_event`, `turn_done`, status, and errors.
+- Avoid direct access to provider credentials, shell commands, license files,
+  EDA binaries, and workspace secrets.
+
+Backend responsibilities:
+
+- Serve the frontend assets directly or expose them behind another HTTP server.
+- Serve `/config.json`, `/health`, `/version`, and the `/browser` WebSocket.
+- Attach to the shared hub daemon and expose session state through `ClineCore`
+  and `HubUIClient`.
+- Own provider credentials, hub auth tokens, session persistence, logs, and
+  approval handling.
+- Invoke local shell commands, MCP servers, plugins, or queue/farm adapters for
+  EDA execution.
+- Read and write durable workspace artifacts such as RTL, testbenches, logs,
+  waveforms, coverage, constraints, and timing reports.
+
+The frontend/backend contract is the message protocol in
+`apps/cline-hub/src/webview-protocol.ts` plus the HTTP/WebSocket endpoints
+implemented by `apps/cline-hub/src/server.ts`. If the frontend is hosted
+separately from the backend, deployment must preserve the same public base URL,
+`/config.json` values, room-secret policy, and WebSocket routing to `/browser`.
+
+CentOS compatibility belongs to the backend package. The CLI package declares
+`node >=22`, and this repo also uses Bun for the Hub server/build flow, so older
+CentOS 6/7 environments should be validated with the exact runtime binary,
+glibc/libstdc++ stack, shell environment, and EDA module setup that production
+will use. If direct execution on an old host is not viable, keep the frontend
+static and run the backend in a supported sidecar/container/jump-host that has
+controlled access to the workspace, license environment, and EDA tools.
+
 ### Protocol-Level EDA Example
 
 One concrete production-style flow could look like this:
@@ -680,3 +826,258 @@ get_code_snippet  read a specific function/class
 query_graph       run graph queries
 get_architecture  refresh the high-level summary
 ```
+
+## VS Code Slash Command Flow
+
+The `/` menu in the VS Code Cline extension is implemented inside the Cline
+webview. It is not the VS Code command palette. The webview owns the composer
+autocomplete UI, while the backend/runtime owns command discovery, command
+execution, and workflow or skill expansion.
+
+```mermaid
+flowchart LR
+  User["User types / in Cline chat"] --> TextArea["ChatTextArea.handleInputChange"]
+  TextArea --> Gate["shouldShowSlashCommandsMenu"]
+  Gate --> Menu["SlashCommandMenu"]
+  Menu --> Match["getMatchingSlashCommands"]
+  Match --> Default["Default Commands"]
+  Match --> Workflows["Workflow Commands"]
+  Match --> Mcp["MCP Prompts"]
+  Menu --> Insert["insertSlashCommand"]
+  Insert --> Composer["Composer text becomes /command "]
+  Composer --> Send["Send message"]
+  Send --> Local["Local slash handlers"]
+  Send --> Runtime["SDK runtime slash resolution"]
+```
+
+### Webview Autocomplete
+
+The input flow starts in
+`apps/vscode/webview-ui/src/components/chat/ChatTextArea.tsx`.
+`handleInputChange` calls `shouldShowSlashCommandsMenu(text, cursorPosition)`.
+The menu is shown only when:
+
+- a `/` exists before the cursor
+- the `/` is at the start of the message or preceded by whitespace
+- there is no whitespace between `/` and the cursor
+- another completed slash command has not already appeared earlier in the
+  message
+
+When the menu is visible, `SlashCommandMenu` calls
+`getMatchingSlashCommands(query, localWorkflowToggles, globalWorkflowToggles,
+remoteWorkflowToggles, remoteWorkflows, mcpServers)`.
+
+The command list is built from three sources:
+
+| Source | Where It Comes From | UI Section |
+| --- | --- | --- |
+| Built-in commands | `BASE_SLASH_COMMANDS` in `apps/vscode/src/shared/slashCommands.ts` | `Default Commands` |
+| Enabled workflows | Local, global, and remote workflow toggles | `Workflow Commands` |
+| MCP prompt commands | Connected MCP servers with prompts | `MCP Prompts` |
+
+Current built-in commands are:
+
+```text
+/newtask
+/deep-planning
+/smol
+/newrule
+/reportbug
+```
+
+MCP prompt commands use this format:
+
+```text
+/mcp:<server-name>:<prompt-name>
+```
+
+Selecting a menu item calls `insertSlashCommand`, which replaces the partial
+query with the full command name and appends a trailing space. Arrow keys move
+through the list. Enter or Tab selects the highlighted item.
+
+### Execution Path
+
+The menu only inserts text. Execution happens later when the message is sent.
+
+Some slash commands have explicit local handlers. For example, `/compact` and
+`/smol` are intercepted by the VS Code chat message handler when an active task
+exists, then routed to the condense RPC instead of being sent to the model as
+plain text.
+
+Workflow and skill slash commands are resolved by the SDK runtime. The VS Code
+controller calls `resolveSlashCommands`, which asks the user-instruction config
+service to expand a leading `/workflow` or `/skill` command. Internally,
+`resolveRuntimeSlashCommandFromWatcher` looks up enabled workflow and skill
+records from the watcher and replaces:
+
+```text
+/command rest of user message
+```
+
+with:
+
+```text
+<matched workflow or skill instructions> rest of user message
+```
+
+This means the product has two related but different concepts:
+
+| Concept | Purpose |
+| --- | --- |
+| Slash autocomplete | Helps the user insert a command in the composer. |
+| Runtime slash resolution | Converts workflow or skill commands into instructions before agent execution. |
+| Built-in slash handlers | Run special local behavior such as compaction, new task creation, or bug reporting. |
+
+### Custom Commands
+
+For product usage, prefer adding a workflow rather than editing built-in command
+source code. A workflow is a markdown instruction file that becomes a slash
+command when enabled.
+
+Common workflow locations are:
+
+```text
+<workspace>/.clinerules/workflows/
+<workspace>/.cline/workflows/
+~/Documents/Cline/Workflows/
+~/.cline/workflows/
+```
+
+Example:
+
+```text
+<workspace>/.clinerules/workflows/eda-rtl-flow.md
+```
+
+```markdown
+---
+name: eda-rtl-flow
+description: RTL generation and EDA verification workflow
+---
+
+You are helping with an IC/EDA workflow.
+
+Steps:
+1. Clarify design requirements.
+2. Generate RTL.
+3. Create or launch the testbench.
+4. Run lint.
+5. Run simulation.
+6. Collect reports.
+7. Prepare handoff for synthesis, VCS, and timing analysis.
+```
+
+After the workflow is discovered and enabled through the rules/workflows UI, it
+appears under `Workflow Commands` in the `/` menu.
+
+Implementation note: the current webview menu builds workflow command names
+from enabled workflow file paths, so a workflow may appear as
+`/eda-rtl-flow.md`. The SDK runtime parser can also read `name` from markdown
+frontmatter and normalizes command names internally. For a polished product
+experience, keep the UI display name and runtime command name aligned.
+
+### Skills And Slash Commands
+
+Skills have a separate activation path from the VS Code `/` menu. The important
+distinction is:
+
+| Stage | What Happens | User Visible? |
+| --- | --- | --- |
+| Discovery | Cline scans `SKILL.md` files and records enabled skills in the user-instruction watcher. | Visible in rules/skills UI. |
+| Slash expansion | A leading `/skill-name` can be resolved by the SDK runtime into that skill's instructions. | Not currently listed by the VS Code `/` menu. |
+| Tool invocation | Runtime registers a `skills` tool; the model calls it when a matching skill should be used. | Visible as a `useSkill` tool event in the chat transcript. |
+
+Skill discovery starts in the same user-instruction config service used for
+rules and workflows. `createSkillsConfigDefinition` scans skill directories,
+`parseSkillConfigFromMarkdown` reads the `SKILL.md` frontmatter/body, and the
+watcher stores each enabled skill by normalized name.
+
+The runtime then exposes skills in two ways:
+
+1. `resolveRuntimeSlashCommandFromWatcher` can expand a leading `/skill-name`
+   command into the skill instructions before the user message reaches the
+   agent loop.
+2. `createUserInstructionPlugin` can register a `skills` tool through
+   `createSkillsTool`. This is the model-driven wake-up path. The tool
+   description tells the model to check available skills for matching user
+   tasks, lists enabled skill names, and says invoking the tool is required
+   before responding when a skill matches.
+
+The `skills` tool input schema is:
+
+```text
+skill: string
+args?: string | null
+```
+
+When the model invokes it:
+
+```json
+{ "skill": "eda-rtl-flow", "args": "generate AXI-lite register block" }
+```
+
+the executor returns the selected skill as instruction payload:
+
+```xml
+<command-name>eda-rtl-flow</command-name>
+<command-args>generate AXI-lite register block</command-args>
+<command-instructions>
+...skill description and instructions...
+</command-instructions>
+```
+
+That returned instruction payload is then part of the ongoing agent turn, so the
+model continues with the skill loaded into context.
+
+The skills tool is registered only when all of these are true:
+
+- the session enables the `skills` config extension
+- tools are enabled for the session
+- at least one discovered skill is enabled
+- tool routing/policy has not disabled the `skills` tool
+- optional `config.skills` filtering still leaves a matching enabled skill
+
+If a skill exists on disk but is disabled, filtered out, or the `skills` config
+extension is not enabled, it will not wake up automatically through the tool.
+If all skills are disabled, the runtime intentionally does not register the
+`skills` tool.
+
+In VS Code display terms, SDK `skills` tool events are translated into the
+classic `useSkill` chat artifact. The tool input may use either the new SDK
+shape:
+
+```json
+{ "skill": "commit", "args": null }
+```
+
+or the older classic shape:
+
+```json
+{ "skill_name": "commit" }
+```
+
+To make installed skills appear in the VS Code `/` menu, the product code would
+need to add skills to the webview command source and the backend command
+discovery path:
+
+- `apps/vscode/webview-ui/src/utils/slash-commands.ts`
+- `apps/vscode/src/core/controller/slash/getAvailableSlashCommands.ts`
+- `apps/vscode/src/test/slash-commands.test.ts`
+
+### Adding A Built-In Command
+
+Built-in commands are useful when the command needs privileged local behavior or
+special UI/backend handling. Adding one usually touches more than one layer:
+
+| Layer | Files To Check |
+| --- | --- |
+| Shared definition | `apps/vscode/src/shared/slashCommands.ts` |
+| Webview autocomplete | `apps/vscode/webview-ui/src/utils/slash-commands.ts` and `SlashCommandMenu.tsx` |
+| Message handling | `apps/vscode/webview-ui/src/components/chat/chat-view/hooks/useMessageHandlers.ts` |
+| Backend/RPC handler | `apps/vscode/src/core/controller/slash/` or another controller domain |
+| Tests | `apps/vscode/src/test/slash-commands.test.ts` and webview slash-command tests |
+| CLI parity | `apps/cli/src/tui/commands/slash-command-registry.ts`, autocomplete, help, and local handlers |
+
+Use a workflow when the command is primarily prompt/instruction behavior. Use a
+built-in command when it must call local APIs, mutate task state, trigger an
+RPC, or coordinate with the runtime outside the normal user prompt path.
