@@ -1081,3 +1081,263 @@ special UI/backend handling. Adding one usually touches more than one layer:
 Use a workflow when the command is primarily prompt/instruction behavior. Use a
 built-in command when it must call local APIs, mutate task state, trigger an
 RPC, or coordinate with the runtime outside the normal user prompt path.
+
+## Policy Context MVP Implementation And Debug Notes
+
+This section records the current MVP for policy-bound agent context in Cline
+Hub. The goal is to make the logged-in user's effective context visible and
+carry it from the Hub UI into the SDK/Core session boundary:
+
+- MCP tool list available for the selected scenario
+- file access scopes such as workspace, RTL, EDA reports, and scratch output
+- Linux command profiles such as read-only inspection, EDA runs, and write
+  commands
+- human-in-the-loop approval expectations
+
+The MVP is intentionally narrow. It proves the front-end, Hub backend, shared
+contract, and Core metadata path. Full enforcement of file access, command
+allowlists, MCP filtering, and approval decisions should live in `@cline/core`
+tool policy/evaluator code rather than only in the Hub UI.
+
+### Current MVP Data Flow
+
+```mermaid
+sequenceDiagram
+  participant User as User
+  participant UI as Hub React UI
+  participant Hub as apps/cline-hub server
+  participant Shared as @cline/shared
+  participant Core as @cline/core
+  participant Runtime as Runtime tool context
+
+  User->>UI: Select Policy: EDA Linux or Standard
+  UI->>Hub: WebSocket /browser send frame with config.policyScenario
+  Hub->>Hub: resolveHubPolicyContext(context, config)
+  Hub->>Shared: Use AgentPolicyContext contract
+  Hub->>Core: ClineCore.start({ config.policyContext })
+  Core->>Runtime: Add policyContext to toolContextMetadata
+  Runtime-->>Hub: Session events and hydrated metadata
+  Hub-->>UI: session_hydrated with policyContext
+  UI-->>User: Header selector plus policy summary banner
+```
+
+### Files Changed In The MVP
+
+| Layer | File | Responsibility |
+| --- | --- | --- |
+| Shared SDK contract | `sdk/packages/shared/src/llms/tools.ts` | Defines `AgentPolicyContext`, `FileScopePolicy`, `CommandProfilePolicy`, `PolicyDecision`, and `PolicyEffect`. Extends `ToolPolicy` with decision/effect metadata. |
+| Shared exports | `sdk/packages/shared/src/index.ts`, `sdk/packages/shared/src/index.browser.ts` | Re-exports the policy context types for Node and browser consumers. |
+| Core config | `sdk/packages/core/src/types/config.ts` | Adds `policyContext?: AgentPolicyContext` to `CoreSessionConfig`. |
+| Core runtime host | `sdk/packages/core/src/runtime/host/local-runtime-host.ts` | Copies `config.policyContext` into agent `toolContextMetadata`. |
+| Hub resolver | `apps/cline-hub/src/server/policy-context.ts` | Builds the MVP `standard` and `eda-linux` contexts. The EDA scenario id is `hub-eda-linux-mvp`. |
+| Hub sessions | `apps/cline-hub/src/server/sessions.ts` | Resolves policy context on new session start, passes it into Core, stores it on tracked sessions, and hydrates it back to the browser. |
+| Hub session mapping | `apps/cline-hub/src/server/session-mapping.ts` | Persists and restores policy context in session summaries. |
+| Hub tracked type | `apps/cline-hub/src/server/types.ts` | Adds `policyContext` to `TrackedSession`. |
+| Hub webview protocol | `apps/cline-hub/src/webview-protocol.ts` | Adds browser-safe policy context mirror types and message fields. |
+| Hub UI | `apps/cline-hub/src/webview/src/Chat.tsx` | Shows the visible header policy selector and the active session policy summary banner. |
+| Hub UI composer | `apps/cline-hub/src/webview/src/components/Composer.tsx` | Keeps the advanced composer policy setting path for future richer settings. |
+| Tests | `apps/cline-hub/src/server/policy-context.test.ts` | Verifies policy context resolution and parsing. |
+
+### What The MVP Shows In The UI
+
+The top Hub chat header should show a visible policy selector:
+
+```text
+Policy: EDA Linux
+Policy: Standard
+```
+
+After a session is started or hydrated, the chat view also shows the active
+session policy summary, for example:
+
+```text
+Policy: eda-linux    hub-eda-linux-mvp    6 MCP tools    4 file scopes    3 command profiles
+```
+
+The selector affects the next session start request. Existing session metadata
+is still the source of truth for the policy banner after hydration, because a
+running or restored session may have been created with a different policy.
+
+### Development Launch
+
+For local Hub development, avoid ports already reserved by proxies. In this
+workspace, use `8788` for the Hub dashboard and `5174` for the Vite webview
+server:
+
+```bash
+CLINE_HUB_DASHBOARD_PORT=8788 \
+CLINE_HUB_WEBVIEW_DEV_PORT=5174 \
+bun -F @cline/cline-hub dev
+```
+
+Open:
+
+```text
+http://127.0.0.1:8788/chat
+```
+
+In dev mode there are two services:
+
+| Service | Port | Purpose |
+| --- | --- | --- |
+| Hub dashboard | `8788` | HTTP entry point, `/browser` WebSocket, sessions, provider login, Core/SDK calls, policy context injection. |
+| Vite webview | `5174` | React webview bundle and HMR for files under `apps/cline-hub/src/webview/src`. |
+
+The dev script may still print an older dashboard hint such as `8787`; trust
+the line that says `Cline Hub dashboard listening` and verify with:
+
+```bash
+curl -I http://127.0.0.1:8788/chat
+curl -I http://127.0.0.1:5174/
+```
+
+### Backend And Frontend Verification
+
+Use these checks after touching the policy context MVP:
+
+```bash
+bun -F @cline/cline-hub test
+bun -F @cline/cline-hub typecheck
+bun -F @cline/cline-hub build:webview
+```
+
+For a narrower front-end formatting/type check while iterating on `Chat.tsx`:
+
+```bash
+node_modules/.bin/biome check --diagnostic-level=error apps/cline-hub/src/webview/src/Chat.tsx
+```
+
+Manual smoke test:
+
+1. Start Hub on `8788`.
+2. Open `http://127.0.0.1:8788/chat`.
+3. Confirm the header policy selector is visible.
+4. Send a short message.
+5. Confirm the policy banner appears with `hub-eda-linux-mvp` for the EDA
+   scenario.
+6. Inspect the latest session manifest under `~/.cline/data/sessions/` and
+   verify `metadata.policyContext` exists without printing secrets.
+
+Example proxy-enabled smoke test view:
+
+![Cline Hub policy context proxy smoke test](docs/assets/architecture/cline-hub-policy-proxy-smoke-test.png)
+
+This view shows three signals that the MVP path is active:
+
+- the chat header exposes the `Policy: EDA Linux` selector
+- the hydrated session banner shows `hub-eda-linux-mvp`
+- the prompt can run after restarting Hub with proxy environment variables for
+  provider token exchange
+
+### Provider Login And Callback Debug
+
+Hub provider login is separate from policy context. If the chat ends with
+`Done (error)` and no assistant output, first check provider credentials before
+debugging policy.
+
+For the OpenAI ChatGPT Subscription provider, the provider id is
+`openai-codex`. Its browser login flow uses a local callback:
+
+```text
+http://localhost:1455/auth/callback
+```
+
+The expected login path is:
+
+```text
+Hub Models page
+  -> Login via Browser
+  -> external browser completes provider auth
+  -> browser redirects to localhost:1455/auth/callback?code=...
+  -> Core exchanges the code for tokens
+  -> tokens are stored in ~/.cline/data/settings/providers.json
+  -> Hub receives provider_oauth_login_done and refreshes the provider catalog
+```
+
+Important distinction:
+
+| UI state | Meaning |
+| --- | --- |
+| Provider toggle enabled | The provider is available for selection. |
+| `Login via Browser` still visible | OAuth credentials are not saved locally yet. |
+| `Done (error)` with zero input/output usage | The model call likely failed before streaming, often due to missing provider credentials. |
+
+Safe local checks:
+
+```bash
+lsof -nP -iTCP:1455 -sTCP:LISTEN
+```
+
+Run the login while Hub is running and do not restart Hub during the flow. If
+`1455` is occupied or intercepted by a proxy/security tool, the remote login
+page can succeed while local token persistence fails.
+
+Also check whether the Hub backend can reach the provider token endpoint. A
+browser may succeed because it uses the system proxy, while the Bun/Node Hub
+process has no proxy environment and times out during token exchange:
+
+```bash
+curl -I --connect-timeout 10 --max-time 20 https://auth.openai.com/oauth/token
+curl -I --proxy http://127.0.0.1:7897 --connect-timeout 10 --max-time 20 https://auth.openai.com/oauth/token
+```
+
+If direct access times out but the proxy succeeds, restart Hub with proxy
+environment variables and keep local addresses out of the proxy:
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7897 \
+HTTP_PROXY=http://127.0.0.1:7897 \
+NO_PROXY=localhost,127.0.0.1,::1 \
+CLINE_HUB_DASHBOARD_PORT=8788 \
+CLINE_HUB_WEBVIEW_DEV_PORT=5174 \
+bun -F @cline/cline-hub dev
+```
+
+For `auth.openai.com/oauth/token`, an HTTP `405 Method Not Allowed` response to
+`curl -I` is a useful connectivity signal, because the endpoint expects a POST
+during the real OAuth exchange.
+
+Check provider settings only as a redacted summary:
+
+```bash
+jq '.providers | to_entries | map({
+  provider: .key,
+  enabled: .value.enabled,
+  tokenSource: .value.tokenSource,
+  modelId: .value.modelId,
+  hasApiKey: ((.value.apiKey // "") | length > 0),
+  hasAccessToken: ((.value.auth.accessToken // "") | length > 0),
+  hasRefreshToken: ((.value.auth.refreshToken // "") | length > 0)
+})' ~/.cline/data/settings/providers.json
+```
+
+Do not print raw `apiKey`, `accessToken`, or `refreshToken` values in logs or
+documentation.
+
+For `openai-native`, browser login is not enough; it expects an API key such
+as `OPENAI_API_KEY` or a saved provider API key. That is a different credential
+path from `openai-codex`.
+
+### Debug Signals To Add Next
+
+If callback failures remain hard to see, add targeted non-secret logs around:
+
+- `apps/cline-hub/src/server/providers.ts`: before and after
+  `loginAndSaveLocalProviderOAuthCredentials`, including provider id and
+  whether a token is present.
+- `sdk/packages/core/src/auth/server.ts`: when the local callback server binds,
+  receives a callback, rejects state/path, times out, or closes.
+- `sdk/packages/core/src/auth/provider-auth-registry.ts`: whether a handler
+  exists and whether `saveCredentials` returned settings with credentials
+  present.
+
+Logs must redact code/token values. Useful fields are provider id, callback
+path, bound port, result status, and booleans such as `hasAccessToken`.
+
+## Hub View Screenshot
+
+The Hub web view provides a browser-based control surface for Cline sessions,
+workspace selection, provider/model selection, channel navigation, schedules,
+customizations, and live chat/task history.
+
+![Cline Hub sessions view](docs/assets/architecture/cline-hub-sessions-view.png)
