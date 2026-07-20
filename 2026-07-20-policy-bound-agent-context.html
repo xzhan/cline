@@ -1,0 +1,1116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Policy-Bound Agent Context Spec</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-soft: #f0f4f8;
+      --text: #17202a;
+      --muted: #5f6b7a;
+      --border: #d8dee8;
+      --primary: #176b87;
+      --primary-soft: #d9edf3;
+      --accent: #6f7f2a;
+      --accent-soft: #ecefd4;
+      --warn: #9b6315;
+      --warn-soft: #f7ead2;
+      --danger: #a83c36;
+      --danger-soft: #f6dddd;
+      --ok: #28705a;
+      --ok-soft: #dff1ea;
+      --code: #253242;
+      --shadow: 0 14px 34px rgba(25, 35, 55, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--primary);
+    }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    code {
+      color: var(--code);
+      background: var(--panel-soft);
+      padding: 0.1rem 0.25rem;
+      border-radius: 4px;
+    }
+
+    pre {
+      margin: 0;
+      overflow: auto;
+      padding: 0.875rem;
+      color: var(--code);
+      background: #eef2f6;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.2;
+      margin: 0;
+      font-weight: 650;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 5vw, 3.1rem);
+    }
+
+    h2 {
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      font-size: 1.05rem;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    ul, ol {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th, td {
+      padding: 0.7rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 650;
+      background: var(--panel-soft);
+    }
+
+    .page {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr);
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 1.25rem;
+      border-right: 1px solid var(--border);
+      background: var(--panel);
+      overflow: auto;
+    }
+
+    .brand {
+      display: grid;
+      gap: 0.2rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .brand strong {
+      font-size: 1.05rem;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .small {
+      font-size: 0.88rem;
+    }
+
+    .nav {
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .nav a {
+      display: block;
+      padding: 0.42rem 0.5rem;
+      color: var(--muted);
+      text-decoration: none;
+      border-radius: 6px;
+    }
+
+    .nav a:hover {
+      color: var(--text);
+      background: var(--panel-soft);
+    }
+
+    .content {
+      min-width: 0;
+      padding: 2rem;
+    }
+
+    .hero {
+      display: grid;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      padding: 1.25rem 0 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hero-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .section {
+      display: grid;
+      gap: 0.9rem;
+      margin: 1rem 0;
+      padding: 1rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .section.plain {
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      padding: 0;
+    }
+
+    .section-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      display: grid;
+      gap: 0.4rem;
+      padding: 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .card.soft {
+      background: var(--panel-soft);
+    }
+
+    .metric {
+      font-size: 1.6rem;
+      line-height: 1;
+      font-weight: 700;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      width: fit-content;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+
+    .chip.ok {
+      color: var(--ok);
+      background: var(--ok-soft);
+      border-color: color-mix(in srgb, var(--ok) 35%, var(--border));
+    }
+
+    .chip.warn {
+      color: var(--warn);
+      background: var(--warn-soft);
+      border-color: color-mix(in srgb, var(--warn) 35%, var(--border));
+    }
+
+    .chip.danger {
+      color: var(--danger);
+      background: var(--danger-soft);
+      border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0.55rem;
+      align-items: stretch;
+    }
+
+    .flow-step {
+      display: grid;
+      align-content: center;
+      gap: 0.25rem;
+      min-height: 5.25rem;
+      padding: 0.75rem;
+      text-align: center;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .flow-step strong {
+      color: var(--primary);
+    }
+
+    .stack {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .rule {
+      display: grid;
+      gap: 0.35rem;
+      padding: 0.65rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .rule:last-child {
+      border-bottom: 0;
+    }
+
+    .mock-shell {
+      display: grid;
+      grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+      gap: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .mock-nav {
+      display: grid;
+      align-content: start;
+      gap: 0.25rem;
+      padding: 0.85rem;
+      background: #eef3f5;
+      border-right: 1px solid var(--border);
+    }
+
+    .mock-nav strong {
+      margin-bottom: 0.4rem;
+    }
+
+    .mock-nav span {
+      padding: 0.38rem 0.45rem;
+      border-radius: 6px;
+      color: var(--muted);
+    }
+
+    .mock-nav span.active {
+      color: #ffffff;
+      background: var(--primary);
+    }
+
+    .mock-main {
+      display: grid;
+      gap: 0.9rem;
+      padding: 1rem;
+      min-width: 0;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: end;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .control {
+      display: grid;
+      gap: 0.25rem;
+      min-width: 10rem;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 0.84rem;
+      font-weight: 650;
+    }
+
+    select, input {
+      width: 100%;
+      padding: 0.48rem 0.55rem;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    button {
+      padding: 0.48rem 0.7rem;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button.primary {
+      color: #ffffff;
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+
+    .table-mini {
+      display: grid;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .mini-row {
+      display: grid;
+      grid-template-columns: minmax(7rem, 0.8fr) minmax(0, 1.4fr) auto;
+      gap: 0.6rem;
+      align-items: center;
+      padding: 0.58rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .mini-row:last-child {
+      border-bottom: 0;
+    }
+
+    .mini-row code {
+      overflow-wrap: anywhere;
+    }
+
+    .approval {
+      display: grid;
+      gap: 0.65rem;
+      padding: 0.85rem;
+      border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border));
+      border-radius: 8px;
+      background: var(--warn-soft);
+    }
+
+    .approval.deny {
+      border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+      background: var(--danger-soft);
+    }
+
+    .callout {
+      padding: 0.8rem 0.9rem;
+      border-left: 4px solid var(--primary);
+      background: var(--primary-soft);
+      border-radius: 6px;
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 1rem;
+    }
+
+    .footer-note {
+      margin: 1.5rem 0 0;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+
+    @media (max-width: 980px) {
+      .page {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .content {
+        padding: 1.25rem;
+      }
+
+      .grid-2, .grid-3, .decision {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .flow, .mock-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .mock-nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .mini-row {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar {
+        align-items: stretch;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside class="sidebar">
+      <div class="brand">
+        <strong>Policy-Bound Agent Context</strong>
+        <span class="small muted">Cline Hub after-login policy spec</span>
+      </div>
+      <nav class="nav" aria-label="Spec navigation">
+        <a href="#summary">Summary</a>
+        <a href="#requirements">Requirements</a>
+        <a href="#policy-model">Policy Model</a>
+        <a href="#context-schema">Context Schema</a>
+        <a href="#ui-admin">Admin UI</a>
+        <a href="#ui-user">User Operation UI</a>
+        <a href="#combined-effect">Command + File Effect</a>
+        <a href="#approval">Human Approval</a>
+        <a href="#eda-example">EDA Example</a>
+        <a href="#next-steps">Next Steps</a>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <header class="hero" id="summary">
+        <div class="hero-row">
+          <div class="stack">
+            <h1>Policy-Bound Agent Context Spec</h1>
+            <p class="muted">用户登录后，Hub 根据身份、场景、workspace 和策略生成 Agent 可见且 runtime 强制执行的上下文。</p>
+          </div>
+          <div class="chip-row" aria-label="Spec tags">
+            <span class="chip ok">Hub central policy</span>
+            <span class="chip warn">Human-in-loop</span>
+            <span class="chip">MCP tools</span>
+            <span class="chip">File scopes</span>
+            <span class="chip">Linux whitelist</span>
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>Core idea:</strong>
+          Agent Context 不是 prompt 文本补充，而是一个双层对象：
+          <strong>model-visible context</strong> 告诉模型能做什么；
+          <strong>runtime-enforced policy</strong> 在 MCP、文件、shell、审批层真正拦截动作。
+        </div>
+      </header>
+
+      <section class="section" id="requirements">
+        <div class="section-head">
+          <h2>1. Requirement Summary</h2>
+          <span class="chip">after login</span>
+        </div>
+        <div class="grid-2">
+          <div class="card soft">
+            <h3>Functional Requirements</h3>
+            <ul>
+              <li>登录后构建 per-user, per-session Agent Context。</li>
+              <li>按场景注入 MCP tool list、file access、Linux command whitelist。</li>
+              <li>支持 VS Code、Hub、CLI、GChat/Slack connector、EDA Linux server 等场景差异。</li>
+              <li>支持用户申请自定义目录 scope，但必须经过 Hub admin policy 约束。</li>
+              <li>支持对敏感 command 的 human-in-loop confirmation。</li>
+              <li>所有 tool/file/command action 都必须 fail closed。</li>
+            </ul>
+          </div>
+          <div class="card soft">
+            <h3>Non-Goals</h3>
+            <ul>
+              <li>不让 prompt instruction 单独承担安全边界。</li>
+              <li>不允许 human approval 绕过明确 deny policy。</li>
+              <li>不把 EDA tool 语义硬编码到通用 agent loop。</li>
+              <li>不默认开放任意 shell，例如 <code>bash -c</code>、<code>rm -rf</code>、任意脚本执行。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="policy-model">
+        <div class="section-head">
+          <h2>2. Policy Model</h2>
+          <span class="chip ok">recommended: layered model</span>
+        </div>
+        <div class="flow" aria-label="Policy resolution flow">
+          <div class="flow-step">
+            <strong>Login</strong>
+            <span class="small muted">user, role, team</span>
+          </div>
+          <div class="flow-step">
+            <strong>Hub Policy</strong>
+            <span class="small muted">central admin source of truth</span>
+          </div>
+          <div class="flow-step">
+            <strong>Workspace Policy</strong>
+            <span class="small muted">repo paths, EDA scripts</span>
+          </div>
+          <div class="flow-step">
+            <strong>Scenario Policy</strong>
+            <span class="small muted">Hub, CLI, VS Code, connector</span>
+          </div>
+          <div class="flow-step">
+            <strong>Runtime Check</strong>
+            <span class="small muted">enforce and audit</span>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Where config lives</th>
+              <th>Best for</th>
+              <th>Risk</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Central Hub Admin</td>
+              <td>Hub database/config service</td>
+              <td>Enterprise control, audit, EDA license governance</td>
+              <td>Needs Hub availability and admin UI</td>
+            </tr>
+            <tr>
+              <td>Workspace Repo Config</td>
+              <td><code>.cline/</code>, <code>.clinerules/</code>, repo policy files</td>
+              <td>Project-specific paths, scripts, and local rules</td>
+              <td>Can drift per repo unless locked or signed</td>
+            </tr>
+            <tr>
+              <td>Layered Model</td>
+              <td>Hub baseline + workspace rules + scenario + approval</td>
+              <td>Long-term production architecture</td>
+              <td>Needs clear precedence and conflict UI</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="card">
+          <h3>Precedence Rule</h3>
+          <pre><code>Global deny > Hub admin policy > workspace policy > scenario policy > human approval</code></pre>
+          <p class="muted small">Human approval can approve only an action that is already allowed but marked <code>approval_required</code>.</p>
+        </div>
+      </section>
+
+      <section class="section" id="context-schema">
+        <div class="section-head">
+          <h2>3. Agent Context Schema</h2>
+          <span class="chip">model-visible + runtime-enforced</span>
+        </div>
+        <div class="grid-2">
+          <pre><code>{
+  "user": {
+    "id": "james",
+    "roles": ["eda-designer"],
+    "teams": ["rtl", "verification"]
+  },
+  "scenario": "eda-linux-hub-session",
+  "workspaceRoots": ["/proj/chip/top"],
+  "mcpTools": [
+    "eda.run_lint",
+    "eda.submit_vcs_job",
+    "reports.parse_timing"
+  ],
+  "fileScopes": [
+    {
+      "name": "rtl",
+      "path": "/proj/chip/top/rtl",
+      "access": ["read", "write"]
+    },
+    {
+      "name": "sim",
+      "path": "/proj/chip/top/sim",
+      "access": ["read", "write"]
+    }
+  ],
+  "deny": ["**/.env", "**/secrets/**", "/license/**"],
+  "shellWhitelist": [
+    "make lint",
+    "make sim",
+    "make vcs TEST=*",
+    "pt_shell -f scripts/*.tcl"
+  ],
+  "approvalRequiredFor": [
+    "vcs",
+    "sta",
+    "remote_eda_job",
+    "file_delete"
+  ]
+}</code></pre>
+          <div class="stack">
+            <div class="card soft">
+              <h3>Context Builder Inputs</h3>
+              <ul>
+                <li>User identity and role.</li>
+                <li>Session source: Hub, CLI, VS Code, connector.</li>
+                <li>Workspace root and repo policy.</li>
+                <li>Hub admin policy and global deny list.</li>
+                <li>Runtime capabilities and available MCP servers.</li>
+              </ul>
+            </div>
+            <div class="card soft">
+              <h3>Runtime Enforcement Points</h3>
+              <ul>
+                <li>MCP tool registry filters tool exposure.</li>
+                <li>File tool canonicalizes paths and checks scopes.</li>
+                <li>Shell tool checks command profile and file effects.</li>
+                <li>Approval service gates sensitive actions.</li>
+                <li>Audit service records decisions and outcomes.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="ui-admin">
+        <div class="section-head">
+          <h2>4. Hub Admin UI Mock</h2>
+          <span class="chip ok">central policy</span>
+        </div>
+
+        <div class="mock-shell">
+          <nav class="mock-nav" aria-label="Mock admin navigation">
+            <strong>Cline Hub Admin</strong>
+            <span>Home</span>
+            <span class="active">Policy Context</span>
+            <span>MCP Tools</span>
+            <span>File Access</span>
+            <span>Commands</span>
+            <span>Audit Log</span>
+          </nav>
+          <div class="mock-main">
+            <div class="toolbar">
+              <div>
+                <h3>Post-login effective context</h3>
+                <p class="small muted">Preview what an agent receives after login.</p>
+              </div>
+              <div class="control">
+                <label for="adminScenario">Scenario</label>
+                <select id="adminScenario">
+                  <option>EDA Linux Hub</option>
+                  <option>VS Code Local</option>
+                  <option>GChat Connector</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid-3">
+              <div class="card soft">
+                <span class="muted small">User</span>
+                <span class="metric">james</span>
+                <span class="small muted">role: eda-designer</span>
+              </div>
+              <div class="card soft">
+                <span class="muted small">MCP tools</span>
+                <span class="metric">3</span>
+                <span class="small muted">filtered by Hub policy</span>
+              </div>
+              <div class="card soft">
+                <span class="muted small">Shell commands</span>
+                <span class="metric">4</span>
+                <span class="small muted">2 require approval</span>
+              </div>
+            </div>
+
+            <div class="grid-2">
+              <div class="stack">
+                <h3>MCP tool list</h3>
+                <div class="table-mini">
+                  <div class="mini-row"><code>eda.run_lint</code><span>local MCP or project wrapper</span><span class="chip ok">allow</span></div>
+                  <div class="mini-row"><code>eda.submit_vcs_job</code><span>license-heavy remote job</span><span class="chip warn">approval</span></div>
+                  <div class="mini-row"><code>reports.parse_timing</code><span>report parser</span><span class="chip ok">allow</span></div>
+                </div>
+              </div>
+              <div class="stack">
+                <h3>Linux command whitelist</h3>
+                <div class="table-mini">
+                  <div class="mini-row"><code>make lint</code><span>read RTL, write lint logs</span><span class="chip ok">allow</span></div>
+                  <div class="mini-row"><code>make vcs TEST=*</code><span>read RTL/TB, write sim/waves/logs</span><span class="chip warn">approval</span></div>
+                  <div class="mini-row"><code>rm -rf *</code><span>destructive delete pattern</span><span class="chip danger">deny</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="ui-user">
+        <div class="section-head">
+          <h2>5. User Operation UI Mock</h2>
+          <span class="chip warn">custom path + command preflight</span>
+        </div>
+
+        <div class="mock-shell">
+          <nav class="mock-nav" aria-label="Mock user steps">
+            <strong>User Flow</strong>
+            <span class="active">1. Choose scenario</span>
+            <span class="active">2. Add directory</span>
+            <span class="active">3. Review command</span>
+            <span>4. Approve</span>
+          </nav>
+          <div class="mock-main">
+            <div class="toolbar">
+              <div>
+                <h3>User context before agent runs</h3>
+                <p class="small muted">自定义目录和 command effect 一起预检。</p>
+              </div>
+              <div class="control">
+                <label for="operationSelect">Operation</label>
+                <select id="operationSelect">
+                  <option value="vcs">Run VCS smoke</option>
+                  <option value="sta">Run STA</option>
+                  <option value="blocked">Blocked cleanup</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid-3">
+              <div class="card soft">
+                <span class="muted small">Effective result</span>
+                <span class="metric" id="resultText">Approval</span>
+                <span class="small muted" id="resultHint">Allowed, but needs human confirmation.</span>
+              </div>
+              <div class="card soft">
+                <span class="muted small">Custom directory</span>
+                <span class="metric" id="dirText">Valid</span>
+                <span class="small muted">under admin base path</span>
+              </div>
+              <div class="card soft">
+                <span class="muted small">File effects</span>
+                <span class="metric" id="effectText">4</span>
+                <span class="small muted">reads and writes checked</span>
+              </div>
+            </div>
+
+            <div class="grid-2">
+              <div class="stack">
+                <h3>Add custom directory</h3>
+                <div class="card soft">
+                  <label for="pathInput">Directory path</label>
+                  <input id="pathInput" value="/proj/chip/top/sim">
+                  <div class="chip-row">
+                    <span class="chip ok">read</span>
+                    <span class="chip ok">write</span>
+                    <span class="chip danger">delete denied</span>
+                  </div>
+                </div>
+                <div class="table-mini" id="scopeRows"></div>
+              </div>
+
+              <div class="stack">
+                <h3>Command effect preview</h3>
+                <div class="card soft">
+                  <span class="muted small">Command</span>
+                  <code id="commandText">make vcs TEST=smoke</code>
+                  <span class="chip warn" id="commandStatus">approval required</span>
+                </div>
+                <div class="table-mini" id="effectRows"></div>
+                <div class="approval" id="approvalBox">
+                  <strong id="approvalTitle">Approve command once?</strong>
+                  <p class="small" id="approvalReason">VCS uses shared licenses and writes simulation artifacts.</p>
+                  <div class="button-row" id="approvalButtons">
+                    <button class="primary">Approve once</button>
+                    <button>Approve for session</button>
+                    <button>Deny</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="combined-effect">
+        <div class="section-head">
+          <h2>6. Command + File Combined Effect</h2>
+          <span class="chip">preflight algorithm</span>
+        </div>
+        <div class="decision">
+          <div class="card soft">
+            <h3>Command Profile</h3>
+            <pre><code>{
+  "command": "make vcs TEST=*",
+  "cwd": "/proj/chip/top",
+  "reads": [
+    "/proj/chip/top/rtl/**",
+    "/proj/chip/top/tb/**",
+    "/proj/chip/top/scripts/**"
+  ],
+  "writes": [
+    "/proj/chip/top/sim/**",
+    "/proj/chip/top/logs/**",
+    "/proj/chip/top/waves/**"
+  ],
+  "requiresApproval": true,
+  "reason": "uses VCS license and writes simulation artifacts"
+}</code></pre>
+          </div>
+          <div class="card soft">
+            <h3>Runtime Check</h3>
+            <ol>
+              <li>Canonicalize command, cwd, paths, and symlinks.</li>
+              <li>Check command against whitelist and denied patterns.</li>
+              <li>Expand command profile reads/writes/deletes.</li>
+              <li>Intersect effects with effective file policy.</li>
+              <li>Block if any effect touches deny path.</li>
+              <li>Ask approval when policy says approval required.</li>
+              <li>Execute only exact approved command/effect tuple.</li>
+            </ol>
+          </div>
+        </div>
+        <pre><code>effective permission = user policy ∩ workspace policy ∩ command profile effects</code></pre>
+      </section>
+
+      <section class="section" id="approval">
+        <div class="section-head">
+          <h2>7. Human-In-The-Loop Confirmation</h2>
+          <span class="chip warn">approval cannot bypass deny</span>
+        </div>
+        <div class="grid-2">
+          <div class="approval">
+            <strong>Human Approval Required</strong>
+            <p><strong>User:</strong> james</p>
+            <p><strong>Scenario:</strong> eda-linux-hub-session</p>
+            <p><strong>Command:</strong> <code>make vcs TEST=smoke</code></p>
+            <p><strong>Working directory:</strong> <code>/proj/chip/top</code></p>
+            <p><strong>Reason:</strong> VCS consumes shared simulation licenses and may run for a long time.</p>
+            <div class="button-row">
+              <button class="primary">Approve once</button>
+              <button>Approve for session</button>
+              <button>Deny</button>
+            </div>
+          </div>
+          <div class="card soft">
+            <h3>Audit Record</h3>
+            <pre><code>{
+  "approvalId": "approval-123",
+  "user": "james",
+  "sessionId": "session-eda-001",
+  "action": "shell",
+  "command": "make vcs TEST=smoke",
+  "cwd": "/proj/chip/top",
+  "effects": {
+    "read": ["rtl/**", "tb/**"],
+    "write": ["sim/**", "logs/**", "waves/**"]
+  },
+  "decision": "approved_once",
+  "timestamp": "2026-07-20T21:00:00+08:00"
+}</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="eda-example">
+        <div class="section-head">
+          <h2>8. EDA Scenario Example</h2>
+          <span class="chip ok">overnight IC design cycle</span>
+        </div>
+        <div class="flow" aria-label="EDA workflow">
+          <div class="flow-step"><strong>Requirement</strong><span class="small muted">spec, assumptions</span></div>
+          <div class="flow-step"><strong>Generate RTL</strong><span class="small muted">SV/Verilog files</span></div>
+          <div class="flow-step"><strong>Testbench</strong><span class="small muted">SV/UVM/Cocotb</span></div>
+          <div class="flow-step"><strong>Lint + VCS</strong><span class="small muted">logs, waves, coverage</span></div>
+          <div class="flow-step"><strong>STA</strong><span class="small muted">timing reports</span></div>
+        </div>
+        <div class="table-mini">
+          <div class="mini-row"><code>eda.run_lint</code><span>Read RTL, write lint reports</span><span class="chip ok">allow</span></div>
+          <div class="mini-row"><code>eda.submit_vcs_job</code><span>Read RTL/TB, submit remote farm job, write logs/waves</span><span class="chip warn">approval</span></div>
+          <div class="mini-row"><code>reports.parse_timing</code><span>Read STA reports, no workspace write</span><span class="chip ok">allow</span></div>
+          <div class="mini-row"><code>pt_shell -f scripts/run_sta.tcl</code><span>Read netlist/libs/constraints, write timing reports</span><span class="chip warn">approval</span></div>
+        </div>
+      </section>
+
+      <section class="section" id="next-steps">
+        <div class="section-head">
+          <h2>9. Next Steps</h2>
+          <span class="chip">implementation planning</span>
+        </div>
+        <ol>
+          <li>Add a `Policy-Bound Agent Context` section to `ARCHITECTURE.md`.</li>
+          <li>Define TypeScript types for `AgentPolicyContext`, `FileScope`, `CommandProfile`, and `ApprovalPolicy`.</li>
+          <li>Implement Hub policy resolver: identity + scenario + workspace + admin config.</li>
+          <li>Filter MCP tools before they are exposed to the agent.</li>
+          <li>Gate file tools with canonical path and deny-list checks.</li>
+          <li>Gate shell execution with command profile and combined file-effect checks.</li>
+          <li>Add approval UI and audit trail in Hub.</li>
+          <li>Add tests for allowed, approval-required, denied, symlink, and path traversal cases.</li>
+        </ol>
+      </section>
+
+      <p class="footer-note small muted">Spec generated from the Cline Hub policy-bound Agent Context discussion on 2026-07-20.</p>
+    </main>
+  </div>
+
+  <script>
+    const operationSelect = document.getElementById("operationSelect");
+    const resultText = document.getElementById("resultText");
+    const resultHint = document.getElementById("resultHint");
+    const dirText = document.getElementById("dirText");
+    const effectText = document.getElementById("effectText");
+    const commandText = document.getElementById("commandText");
+    const commandStatus = document.getElementById("commandStatus");
+    const scopeRows = document.getElementById("scopeRows");
+    const effectRows = document.getElementById("effectRows");
+    const approvalBox = document.getElementById("approvalBox");
+    const approvalTitle = document.getElementById("approvalTitle");
+    const approvalReason = document.getElementById("approvalReason");
+    const approvalButtons = document.getElementById("approvalButtons");
+
+    const operations = {
+      vcs: {
+        result: ["Approval", "Allowed, but needs human confirmation.", "Valid", "4"],
+        command: "make vcs TEST=smoke",
+        status: ["approval required", "chip warn"],
+        approval: ["Approve command once?", "VCS uses shared licenses and writes simulation artifacts.", true, false],
+        scopes: [
+          ["read", "/proj/chip/top/rtl/**", "allow", "chip ok"],
+          ["read", "/proj/chip/top/tb/**", "allow", "chip ok"],
+          ["write", "/proj/chip/top/sim/**", "allow", "chip ok"],
+          ["write", "/proj/chip/top/logs/**", "allow", "chip ok"],
+          ["deny", "**/.env, **/secrets/**", "deny", "chip danger"]
+        ],
+        effects: [
+          ["read", "/proj/chip/top/rtl/**", "allowed", "chip ok"],
+          ["read", "/proj/chip/top/tb/**", "allowed", "chip ok"],
+          ["write", "/proj/chip/top/sim/**", "allowed", "chip ok"],
+          ["write", "/proj/chip/top/logs/**", "allowed", "chip ok"]
+        ]
+      },
+      sta: {
+        result: ["Approval", "Allowed, but timing tool requires confirmation.", "Valid", "5"],
+        command: "pt_shell -f scripts/run_sta.tcl",
+        status: ["approval required", "chip warn"],
+        approval: ["Approve STA run?", "STA may consume timing licenses and write reports.", true, false],
+        scopes: [
+          ["read", "/proj/chip/top/netlist/**", "allow", "chip ok"],
+          ["read", "/proj/chip/top/constraints/**", "allow", "chip ok"],
+          ["read", "/proj/chip/libs/**", "allow", "chip ok"],
+          ["write", "/proj/chip/top/reports/sta/**", "allow", "chip ok"],
+          ["deny", "/license/**", "deny", "chip danger"]
+        ],
+        effects: [
+          ["read", "/proj/chip/top/netlist/**", "allowed", "chip ok"],
+          ["read", "/proj/chip/top/constraints/**", "allowed", "chip ok"],
+          ["read", "/proj/chip/libs/**", "allowed", "chip ok"],
+          ["write", "/proj/chip/top/reports/sta/**", "allowed", "chip ok"],
+          ["read", "/license/**", "blocked", "chip danger"]
+        ]
+      },
+      blocked: {
+        result: ["Denied", "Command touches denied delete scope.", "Invalid", "2"],
+        command: "rm -rf /proj/chip/top/sim",
+        status: ["denied", "chip danger"],
+        approval: ["Policy denied", "Human approval cannot override a denied command or delete effect.", false, true],
+        scopes: [
+          ["read", "/proj/chip/top/**", "allow", "chip ok"],
+          ["write", "/proj/chip/top/sim/**", "allow", "chip ok"],
+          ["delete", "/proj/chip/top/sim/**", "deny", "chip danger"],
+          ["deny", "**/.env, **/secrets/**", "deny", "chip danger"]
+        ],
+        effects: [
+          ["execute", "rm -rf", "blocked", "chip danger"],
+          ["delete", "/proj/chip/top/sim/**", "blocked", "chip danger"]
+        ]
+      }
+    };
+
+    function rowHtml(row) {
+      return `<div class="mini-row"><code>${row[0]}</code><span>${row[1]}</span><span class="${row[3]}">${row[2]}</span></div>`;
+    }
+
+    function updateOperation() {
+      const selected = operations[operationSelect.value];
+      resultText.textContent = selected.result[0];
+      resultHint.textContent = selected.result[1];
+      dirText.textContent = selected.result[2];
+      effectText.textContent = selected.result[3];
+      commandText.textContent = selected.command;
+      commandStatus.textContent = selected.status[0];
+      commandStatus.className = selected.status[1];
+      scopeRows.innerHTML = selected.scopes.map(rowHtml).join("");
+      effectRows.innerHTML = selected.effects.map(rowHtml).join("");
+      approvalTitle.textContent = selected.approval[0];
+      approvalReason.textContent = selected.approval[1];
+      approvalButtons.style.display = selected.approval[2] ? "flex" : "none";
+      approvalBox.classList.toggle("deny", selected.approval[3]);
+    }
+
+    operationSelect.addEventListener("change", updateOperation);
+    updateOperation();
+  </script>
+</body>
+</html>
